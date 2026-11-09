@@ -1,0 +1,77 @@
+
+name: Build HGhub Unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Install iOS dependencies
+        run: |
+          brew install xcodegen cocoapods
+
+      - name: Install project dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Initialize iOS project
+        run: pnpm tauri ios init --ci
+
+      - name: Install CocoaPods
+        run: |
+          pod install --project-directory=src-tauri/gen/apple
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Build unsigned iOS archive
+        run: |
+          xcodebuild archive \
+            -project src-tauri/gen/apple/HGhub.xcodeproj \
+            -scheme HGhub_iOS \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/HGhub.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/HGhub.xcarchive/Products/Applications/HGhub.app Payload/
+          /usr/bin/zip -qry HGhub-unsigned.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: HGhub-unsigned-IPA
+          path: HGhub-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
