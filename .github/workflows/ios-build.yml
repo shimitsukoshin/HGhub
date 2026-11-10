@@ -1,82 +1,75 @@
 
-name: Build HGhub Unsigned iOS IPA
+name: Build HGhub iOS IPA
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-
-permissions:
-  contents: read
+      - master
 
 jobs:
   build-ios:
-    name: Build Unsigned iOS IPA
-    runs-on: macos-15
-    timeout-minutes: 60
+    runs-on: macos-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
-          targets: aarch64-apple-ios
-
-      - name: Install iOS tools
-        run: |
-          brew install xcodegen cocoapods
+          version: 9
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
 
-      - name: Initialize iOS project
-        run: pnpm ios:init
-
-      - name: Build frontend
-        run: pnpm build
-
-      - name: Build unsigned IPA
+      - name: Upgrade Tauri CLI
         run: |
+          pnpm add -D @tauri-apps/cli@2.12.4
+          pnpm tauri --version
+
+      - name: Initialize Tauri iOS project
+        run: pnpm tauri ios init --ci
+
+      - name: Build unsigned iOS IPA
+        run: |
+          set -euo pipefail
+
           pnpm tauri ios build \
             --no-sign \
             --ci \
-            --features custom-protocol
+            --ignore-version-mismatches
 
-      - name: Locate and verify IPA
+      - name: Find and prepare IPA
         run: |
+          set -euo pipefail
+
           IPA_PATH=$(find src-tauri/gen/apple/build \
-            -type f -name "*.ipa" | head -n 1)
+            -type f \
+            -name "*.ipa" \
+            -print -quit)
 
           if [ -z "$IPA_PATH" ]; then
-            echo "ERROR: IPA file not found"
-            find src-tauri/gen/apple/build -maxdepth 5 -type f || true
+            echo "找不到 IPA 檔案"
+            find src-tauri/gen/apple -maxdepth 5 -print
             exit 1
           fi
 
-          cp "$IPA_PATH" HGhub-unsigned.ipa
+          mkdir -p build
+          cp "$IPA_PATH" build/HGhub.ipa
 
-          unzip -t HGhub-unsigned.ipa
+          ls -lh build/HGhub.ipa
 
-          unzip -l HGhub-unsigned.ipa | grep "Payload/"
-
-      - name: Upload IPA artifact
+      - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: HGhub-Unsigned-IPA
-          path: HGhub-unsigned.ipa
+          name: HGhub-iOS-IPA
+          path: build/HGhub.ipa
           if-no-files-found: error
           retention-days: 7
